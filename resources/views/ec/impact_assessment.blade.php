@@ -1,0 +1,475 @@
+@extends('layouts.ec')
+
+@section('content')
+<div class="page-header">
+  <div class="page-header-left">
+    <div class="breadcrumb">PAThrive <i class="fas fa-chevron-right"></i> <a href="{{ route('ec.evaluation') }}" style="color:var(--blue-primary)">Evaluation</a> <i class="fas fa-chevron-right"></i> <span>Impact Assessment</span></div>
+    <h1>Impact Assessment</h1>
+    <p>Manage evaluator submissions and participant survey forms</p>
+  </div>
+  <div style="display:flex;gap:10px">
+    <a href="{{ route('ec.evaluation') }}" class="btn btn-outline"><i class="fas fa-arrow-left"></i> Back</a>
+    @if($tab === 'surveys' && !($viewForm ?? null))
+    <button class="btn btn-primary" onclick="openStandaloneForm()"><i class="fas fa-plus"></i> Create Survey Form</button>
+    @endif
+  </div>
+</div>
+
+@if(session('success'))
+<div class="alert alert-success" style="margin-bottom:20px">
+  <i class="fas fa-square-check"></i> {{ session('success') }}
+</div>
+@elseif(session('error'))
+<div class="alert alert-danger" style="margin-bottom:20px">
+  <i class="fas fa-triangle-exclamation"></i> {{ session('error') }}
+</div>
+@endif
+
+@if($errors->any())
+<div class="alert alert-danger" style="margin-bottom:20px" role="alert">
+  <ul>
+    @foreach($errors->all() as $error)
+    <li>{{ $error }}</li>
+    @endforeach
+  </ul>
+</div>
+@endif
+
+<!-- Tabs -->
+<div style="display:flex;gap:4px;margin-bottom:20px;border-bottom:2px solid var(--gray-200)">
+  <a href="{{ route('ec.impact_assessment', ['tab' => 'evaluators']) }}"
+     style="padding:10px 20px;font-size:13.5px;font-weight:600;text-decoration:none;border-radius:8px 8px 0 0;{{ $tab === 'evaluators' ? 'background:var(--blue-primary);color:#fff' : 'color:var(--gray-500);background:transparent' }}">
+    <i class="fas fa-clipboard-list"></i> Evaluator Submissions
+  </a>
+  <a href="{{ route('ec.impact_assessment', ['tab' => 'surveys']) }}"
+     style="padding:10px 20px;font-size:13.5px;font-weight:600;text-decoration:none;border-radius:8px 8px 0 0;{{ $tab === 'surveys' ? 'background:var(--blue-primary);color:#fff' : 'color:var(--gray-500);background:transparent' }}">
+    <i class="fas fa-file-lines"></i> Participant Surveys
+  </a>
+</div>
+
+@if($tab === 'evaluators')
+{{-- ═══════════════ EVALUATOR SUBMISSIONS TAB ═══════════════ --}}
+
+<div class="card" style="margin-bottom:20px">
+  <div class="card-body" style="padding:14px 20px">
+    <form method="GET" action="{{ route('ec.impact_assessment') }}" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+      <input type="hidden" name="tab" value="evaluators"/>
+      <input type="text" name="q" class="form-control" placeholder="Search by title or evaluator..." value="{{ $q }}" style="max-width:280px"/>
+      <button type="submit" class="btn btn-outline btn-sm"><i class="fas fa-magnifying-glass"></i> Filter</button>
+      @if($q)<a href="{{ route('ec.impact_assessment', ['tab' => 'evaluators']) }}" class="btn btn-outline btn-sm"><i class="fas fa-xmark"></i> Clear</a>@endif
+    </form>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-body" style="padding:0">
+    @if($assessments->isEmpty())
+    <div style="padding:40px;text-align:center;color:var(--gray-400)">No impact assessments received yet.</div>
+    @else
+    <div class="table-wrap">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Title</th>
+          <th>Evaluator</th>
+          <th>Department</th>
+          <th>Activity</th>
+          <th>File</th>
+          <th>Status</th>
+          <th>Submitted</th>
+          <th>Due Date</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        @foreach($assessments as $a)
+        <tr>
+          <td>
+            <div style="font-weight:600">{{ $a->title }}</div>
+          </td>
+          <td>
+            <div style="font-weight:600">{{ $a->evaluator->first_name ?? '' }} {{ $a->evaluator->last_name ?? '' }}</div>
+          </td>
+          <td>{{ $a->evaluator->position ?? '—' }}</td>
+          <td>{{ $a->training->title ?? '—' }}</td>
+          <td>
+            @if($a->form_data)
+            <button type="button" class="btn btn-outline btn-sm" onclick="openModal('viewForm{{ $a->id }}')"><i class="fas fa-list-check"></i> Form &middot; {{ count($a->form_data) }} question{{ count($a->form_data) === 1 ? '' : 's' }}</button>
+            @elseif($a->file_name)
+            <a href="{{ route('files.impact-assessment', $a) }}" target="_blank" class="btn btn-outline btn-sm"><i class="fas fa-file"></i> {{ $a->original_name ?? 'View' }}</a>
+            @else
+            <span style="color:var(--gray-300)">No file</span>
+            @endif
+          </td>
+          <td><span class="badge {{ $a->status === 'Reviewed' ? 'badge-success' : 'badge-info' }}">{{ $a->status }}</span></td>
+          <td>{{ $a->submitted_at?->format('M d, Y') ?? '—' }}</td>
+          <td>{{ $a->due_date?->format('M d, Y') ?? '—' }}</td>
+          <td style="display:flex;gap:6px;flex-wrap:wrap">
+            @if($a->participant_form_id === null && $a->form_data === null && $a->file_name && $a->training_id && in_array($a->status, ['Submitted', 'Reviewed'], true))
+            <button type="button" class="btn btn-sm btn-primary" data-assessment-id="{{ $a->id }}" data-training-id="{{ $a->training_id }}" data-due="{{ $a->due_date?->format('Y-m-d') }}" data-title="{{ $a->title }}" onclick="openFormFromAssessment(this.dataset)"><i class="fas fa-file-lines"></i> Create Participant Form</button>
+            @endif
+            <form method="POST" action="{{ route('ec.impact_assessment.store') }}" onsubmit="return confirm('Delete this assessment?')" style="display:inline">
+              @csrf
+              <input type="hidden" name="action" value="delete"/>
+              <input type="hidden" name="assessment_id" value="{{ $a->id }}"/>
+              <button type="submit" class="btn btn-sm" style="background:#FEE2E2;color:#991B1B;border:none;cursor:pointer"><i class="fas fa-trash"></i></button>
+            </form>
+          </td>
+        </tr>
+        @endforeach
+      </tbody>
+    </table>
+    </div>
+    @endif
+  </div>
+</div>
+
+@php
+  $formAssessments = $assessments->filter(function ($item) { return ! empty($item->form_data); });
+@endphp
+@foreach($formAssessments as $a)
+  @include('partials.assessment-form-modal', ['a' => $a])
+@endforeach
+
+@else
+{{-- ═══════════════ PARTICIPANT SURVEYS TAB ═══════════════ --}}
+
+@if($viewForm)
+<!-- ── Response detail view ── -->
+<div style="margin-bottom:16px">
+  <a href="{{ route('ec.impact_assessment', ['tab' => 'surveys']) }}" class="btn btn-outline btn-sm"><i class="fas fa-arrow-left"></i> Back to Survey Forms</a>
+</div>
+<div class="card" style="margin-bottom:20px">
+  <div class="card-header">
+    <div>
+      <div class="card-title">{{ $viewForm->title }}</div>
+      <div class="card-subtitle"><i class="fas fa-book"></i> {{ $viewForm->training->title ?? '—' }} &middot; Submitted {{ $viewForm->sent_at?->format('M d, Y') ?? '—' }} &middot; Due {{ $viewForm->due_date?->format('M d, Y') ?? '—' }}</div>
+    </div>
+  </div>
+</div>
+
+@if($responses->isEmpty())
+<div class="card">
+  <div class="card-body" style="text-align:center;padding:40px;color:var(--gray-400)">
+    No participants have submitted this assessment yet.
+  </div>
+</div>
+@else
+@php $fields = $viewForm->fields ?? []; @endphp
+@foreach($responses as $resp)
+<div class="card" style="margin-bottom:16px">
+  <div class="card-header">
+    <div>
+      <div style="font-weight:700;color:var(--text-heading)">{{ $resp->beneficiary->first_name }} {{ $resp->beneficiary->last_name }}</div>
+      <div style="font-size:12px;color:var(--gray-400)">{{ $resp->beneficiary->username ?? '' }} &middot; Submitted {{ $resp->submitted_at->format('M d, Y') }}</div>
+    </div>
+    <span class="badge badge-completed"><i class="fas fa-square-check"></i> Submitted</span>
+  </div>
+  <div class="card-body">
+    @foreach($fields as $fi => $field)
+      @php $val = $resp->responses[$fi] ?? ''; @endphp
+      <div style="margin-bottom:14px;padding-bottom:14px;border-bottom:1px solid var(--gray-100)">
+        <div style="font-size:12.5px;font-weight:700;color:var(--gray-500);margin-bottom:4px">{{ $fi + 1 }}. {{ $field['label'] }}</div>
+        <div style="font-size:13.5px;color:var(--text-heading)">
+          @if($val !== '')
+            {{ is_array($val) ? implode(', ', $val) : $val }}
+          @else
+            <span style="color:var(--gray-300)">—</span>
+          @endif
+        </div>
+      </div>
+    @endforeach
+  </div>
+</div>
+@endforeach
+@endif
+
+@else
+<!-- ── Survey forms list ── -->
+@if($surveyForms->isEmpty())
+<div class="card">
+  <div class="card-body" style="text-align:center;padding:60px 24px;color:var(--gray-400)">
+    <i class="fas fa-file-lines"></i>
+    <div style="font-size:15px;font-weight:700;color:var(--text-heading);margin:12px 0 6px">No participant survey forms yet</div>
+    <p style="font-size:13px">Click <strong>Create Survey Form</strong> to build and send an impact assessment to participants.</p>
+  </div>
+</div>
+@else
+<div style="margin-bottom:20px">
+  <div style="position:relative;max-width:400px">
+    <i class="fas fa-search" style="position:absolute;left:12px;top:50%;transform:translateY(-50%);color:var(--gray-400);pointer-events:none"></i>
+    <input type="text" id="surveyFormSearch" placeholder="Search survey forms..." oninput="filterSurveyForms()"
+      style="width:100%;padding:9px 12px 9px 36px;border:1px solid var(--gray-200);border-radius:var(--radius-sm);font-size:13px;color:var(--gray-800);background:var(--white);outline:none"
+      onfocus="this.style.borderColor='var(--blue-primary)'" onblur="this.style.borderColor='var(--gray-200)'"/>
+  </div>
+</div>
+<div class="card">
+  <div class="card-body" style="padding:0">
+    <div class="table-wrap">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Form Title</th>
+          <th>Activity</th>
+          <th>Form Submitted</th>
+          <th>Due Date</th>
+          <th>Completion</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody id="surveyFormBody">
+        @foreach($surveyForms as $sf)
+          @php
+            $total = (int) $sf->total_participants;
+            $done = (int) $sf->responses_count;
+            $pct = $total > 0 ? round($done / $total * 100) : 0;
+          @endphp
+          <tr class="survey-form-row" data-search="{{ strtolower($sf->title . ' ' . ($sf->training->title ?? '')) }}">
+            <td style="font-weight:600">{{ $sf->title }}</td>
+            <td>{{ $sf->training->title ?? '—' }}</td>
+            <td>{{ $sf->sent_at?->format('M d, Y') ?? '—' }}</td>
+            <td>{{ $sf->due_date?->format('M d, Y') ?? '—' }}</td>
+            <td>
+              <div style="display:flex;align-items:center;gap:10px">
+                <div style="flex:1;background:var(--gray-200);border-radius:99px;height:8px;min-width:80px">
+                  <div style="width:{{ $pct }}%;background:{{ $pct === 100 ? 'var(--green)' : 'var(--blue-primary)' }};height:8px;border-radius:99px;transition:width .3s"></div>
+                </div>
+                <span style="font-size:12px;font-weight:700;color:{{ $pct === 100 ? 'var(--green)' : 'var(--text-heading)' }};white-space:nowrap">
+                  {{ $done }}/{{ $total }} ({{ $pct }}%)
+                </span>
+              </div>
+            </td>
+            <td style="display:flex;gap:6px;flex-wrap:wrap">
+              <a href="{{ route('ec.impact_assessment', ['tab' => 'surveys', 'view_form' => $sf->id]) }}" class="btn btn-sm btn-outline"><i class="fas fa-eye"></i> View Responses</a>
+              <form method="POST" action="{{ route('ec.impact_assessment.store') }}" onsubmit="return confirm('Delete this survey form and all responses?')" style="display:inline">
+                @csrf
+                <input type="hidden" name="action" value="delete_form"/>
+                <input type="hidden" name="form_id" value="{{ $sf->id }}"/>
+                <button type="submit" class="btn btn-sm" style="background:#FEE2E2;color:#991B1B;border:none;cursor:pointer"><i class="fas fa-trash"></i></button>
+              </form>
+            </td>
+          </tr>
+        @endforeach
+      </tbody>
+    </table>
+    <div id="surveyFormNoMatch" style="display:none;text-align:center;padding:40px;color:var(--gray-400)">No survey forms match your search.</div>
+    </div>
+  </div>
+</div>
+<script>
+function filterSurveyForms() {
+  const q = document.getElementById('surveyFormSearch').value.toLowerCase().trim();
+  const rows = document.querySelectorAll('#surveyFormBody .survey-form-row');
+  let visibleCount = 0;
+  rows.forEach(row => {
+    const match = !q || row.dataset.search.includes(q);
+    row.style.display = match ? '' : 'none';
+    if (match) visibleCount++;
+  });
+  const noMatch = document.getElementById('surveyFormNoMatch');
+  if (noMatch) noMatch.style.display = (rows.length > 0 && visibleCount === 0) ? '' : 'none';
+}
+</script>
+@endif
+@endif
+
+@endif
+
+<!-- ── Review Modal (evaluator) ── -->
+<div class="modal-overlay" id="modal-reviewAssessment">
+  <div class="modal" style="max-width:460px">
+    <div class="modal-header">
+      <div class="modal-title"><i class="fas fa-square-check"></i> Mark as Reviewed</div>
+      <button class="modal-close" onclick="closeModal('reviewAssessment')"><i class="fas fa-xmark"></i></button>
+    </div>
+    <form method="POST" action="{{ route('ec.impact_assessment.store') }}">
+      @csrf
+      <input type="hidden" name="action" value="review"/>
+      <input type="hidden" name="assessment_id" id="review_id"/>
+      <div class="modal-body">
+        <p id="review_title" style="font-weight:600;color:var(--text-heading);margin-bottom:14px"></p>
+        <div class="form-group">
+          <label class="form-label">Notes / Feedback (optional)</label>
+          <textarea name="ec_notes" class="form-control" rows="4" placeholder="Add any notes or feedback for the evaluator..."></textarea>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline" onclick="closeModal('reviewAssessment')">Cancel</button>
+        <button type="submit" class="btn btn-primary"><i class="fas fa-square-check"></i> Confirm Review</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ── Create Survey Form Modal ── -->
+<div class="modal-overlay" id="modal-createSurveyForm">
+  <div class="modal" style="max-width:640px">
+    <div class="modal-header">
+      <div class="modal-title"><i class="fas fa-file-lines"></i> Create Impact Assessment Survey</div>
+      <button class="modal-close" onclick="closeModal('createSurveyForm')"><i class="fas fa-xmark"></i></button>
+    </div>
+    <form method="POST" action="{{ route('ec.impact_assessment.store') }}">
+      @csrf
+      <input type="hidden" name="action" value="create_form"/>
+      <input type="hidden" name="assessment_id" id="csAssessmentId" value=""/>
+      <div class="modal-body" style="max-height:70vh;overflow-y:auto">
+        <div class="form-group">
+          <label class="form-label">Activity <span style="color:var(--red)">*</span></label>
+          <select name="training_id" id="csTraining" class="form-control" required>
+            <option value="" disabled selected>— Select Activity —</option>
+            @foreach($trainings ?? [] as $t)
+            <option value="{{ $t->id }}">{{ $t->title }}</option>
+            @endforeach
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Due Date <span style="font-weight:400;color:var(--gray-400)" id="csDueNote">(date participants must answer by)</span></label>
+          <input type="date" name="due_date" id="csDue" class="form-control"/>
+          <div style="font-size:11.5px;color:var(--gray-400);margin-top:4px">The submitted date is recorded automatically when you send the form.</div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Form Title</label>
+          <input type="text" name="form_title" id="csTitle" class="form-control" value="Impact Assessment Survey" placeholder="e.g. Post-Activity Impact Assessment"/>
+        </div>
+
+        <div style="border-top:1px solid var(--gray-200);padding-top:16px;margin-top:4px">
+          <div style="font-size:13px;font-weight:700;color:var(--text-heading);margin-bottom:12px">Questions</div>
+          <div id="fieldsContainer"></div>
+          <button type="button" class="btn btn-outline btn-sm" onclick="addField()" style="margin-top:8px"><i class="fas fa-plus"></i> Add Question</button>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline" onclick="closeModal('createSurveyForm')">Cancel</button>
+        <button type="submit" class="btn btn-primary"><i class="fas fa-paper-plane"></i> Send to Participants</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>
+// From an evaluator's uploaded file: the activity and due date are the
+// evaluator's, so they are filled in and locked; the EC only writes the questions.
+function resetSurveyForm() {
+  document.getElementById('csAssessmentId').value = '';
+  document.getElementById('fieldsContainer').replaceChildren();
+  fieldCount = 0;
+}
+function openStandaloneForm() {
+  resetSurveyForm();
+  var t = document.getElementById('csTraining');
+  t.disabled = false; t.required = true; t.value = '';
+  var d = document.getElementById('csDue');
+  d.value = ''; d.readOnly = false; d.style.background = '';
+  document.getElementById('csDueNote').textContent = '(date participants must answer by)';
+  document.getElementById('csTitle').value = 'Impact Assessment Survey';
+  addField();
+  openModal('createSurveyForm');
+}
+function openFormFromAssessment(source) {
+  resetSurveyForm();
+  document.getElementById('csAssessmentId').value = source.assessmentId;
+  var t = document.getElementById('csTraining');
+  t.value = String(source.trainingId || '');
+  t.disabled = true; t.required = false;
+  var d = document.getElementById('csDue');
+  d.value = source.due || ''; d.readOnly = !!source.due; d.style.background = source.due ? 'var(--gray-100)' : '';
+  document.getElementById('csDueNote').textContent = source.due ? '(set by the evaluator)' : '(date participants must answer by)';
+  document.getElementById('csTitle').value = source.title || 'Impact Assessment Survey';
+  addField();
+  openModal('createSurveyForm');
+}
+
+function openReviewModal(id, title) {
+  document.getElementById('review_id').value = id;
+  document.getElementById('review_title').textContent = title;
+  openModal('reviewAssessment');
+}
+
+let fieldCount = 0;
+function addField() {
+  const i = fieldCount++;
+  const div = document.createElement('div');
+  div.style.cssText = 'background:var(--gray-50);border:1.5px solid var(--gray-200);border-radius:10px;padding:14px;margin-bottom:12px';
+  div.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+      <span style="font-size:12px;font-weight:700;color:var(--gray-500)">Question ${i+1}</span>
+      <button type="button" onclick="this.closest('div[data-field]').remove()" style="background:none;border:none;color:#EF4444;cursor:pointer;font-size:16px"><i class="fas fa-xmark"></i></button>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Label *</label>
+      <input type="text" name="field_label[${i}]" class="form-control" placeholder="e.g. How has this activity impacted your livelihood?" required/>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div class="form-group">
+        <label class="form-label">Type</label>
+        <select name="field_type[${i}]" class="form-control" onchange="toggleOptions(this,${i})">
+          <option value="text">Short Text</option>
+          <option value="textarea">Long Text</option>
+          <option value="radio">Multiple Choice</option>
+          <option value="select">Dropdown</option>
+        </select>
+      </div>
+      <div class="form-group" style="display:flex;align-items:flex-end;padding-bottom:4px">
+        <label style="display:flex;align-items:center;gap:8px;font-size:12.5px;cursor:pointer">
+          <input type="checkbox" name="field_required[${i}]" value="1" style="width:15px;height:15px"/> Required
+        </label>
+      </div>
+    </div>
+    <div class="form-group" id="opts_${i}" style="display:none">
+      <label class="form-label">Options <span style="font-weight:400;color:var(--gray-400)">(one per line)</span></label>
+      <textarea name="field_options[${i}]" class="form-control" rows="3" placeholder="Option 1&#10;Option 2&#10;Option 3"></textarea>
+    </div>`;
+  div.setAttribute('data-field', i);
+  document.getElementById('fieldsContainer').appendChild(div);
+}
+function toggleOptions(sel, i) {
+  const show = sel.value === 'radio' || sel.value === 'select';
+  document.getElementById('opts_'+i).style.display = show ? 'block' : 'none';
+}
+document.addEventListener('DOMContentLoaded', function() {
+  const previous = {{ Illuminate\Support\Js::from(old('action') === 'create_form' ? old() : []) }};
+  if (previous.action !== 'create_form') return;
+  const assessment = {{ Illuminate\Support\Js::from(isset($creationAssessment) ? [
+      'assessmentId' => $creationAssessment->id,
+      'trainingId' => $creationAssessment->training_id,
+      'due' => $creationAssessment->due_date?->format('Y-m-d'),
+      'title' => $creationAssessment->title,
+  ] : null) }};
+  if (assessment) {
+    openFormFromAssessment(assessment);
+  } else {
+    openStandaloneForm();
+    // Keep a failed linked request linked; never silently turn it into a
+    // standalone form if its source assessment has disappeared.
+    if (typeof previous.assessment_id === 'string' || typeof previous.assessment_id === 'number') {
+      document.getElementById('csAssessmentId').value = previous.assessment_id;
+    }
+    if (typeof previous.training_id === 'string' || typeof previous.training_id === 'number') {
+      document.getElementById('csTraining').value = previous.training_id;
+    }
+  }
+  if (typeof previous.form_title === 'string') document.getElementById('csTitle').value = previous.form_title;
+  if (!document.getElementById('csDue').readOnly && typeof previous.due_date === 'string') {
+    document.getElementById('csDue').value = previous.due_date;
+  }
+  if (previous.field_label && typeof previous.field_label === 'object') {
+    document.getElementById('fieldsContainer').replaceChildren();
+    fieldCount = 0;
+    Object.entries(previous.field_label).forEach(function ([key, label]) {
+      if (typeof label !== 'string') return;
+      const i = fieldCount;
+      addField();
+      const row = document.querySelector('[data-field="' + i + '"]');
+      row.querySelector('input[type="text"]').value = label;
+      const type = previous.field_type && previous.field_type[key];
+      const select = row.querySelector('select');
+      select.value = ['text', 'textarea', 'radio', 'select'].includes(type) ? type : 'text';
+      toggleOptions(select, i);
+      row.querySelector('input[type="checkbox"]').checked = previous.field_required && String(previous.field_required[key]) === '1';
+      const options = previous.field_options && previous.field_options[key];
+      row.querySelector('textarea').value = typeof options === 'string' ? options : '';
+    });
+  }
+});
+</script>
+@endsection
